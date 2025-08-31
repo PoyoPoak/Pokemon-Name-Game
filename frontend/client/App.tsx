@@ -25,17 +25,7 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <Routes>
-          <Route
-            path="/"
-            element={
-              <>
-                <HomePage />
-                <div className="mt-8">
-                  <Placeholder label="Example UI component" />
-                </div>
-              </>
-            }
-          />
+          <Route path="/" element={<HomePage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </BrowserRouter>
