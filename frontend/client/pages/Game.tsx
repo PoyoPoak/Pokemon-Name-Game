@@ -31,6 +31,29 @@ export function GamePage() {
   const [startTs, setStartTs] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
   const [log, setLog] = useState<GuessLogEntry[]>([]);
+  const [players, setPlayers] = useState<{ name: string; score: number }[]>([]);
+  const [playersError, setPlayersError] = useState<string | null>(null);
+
+  // Poll lobby players
+  useEffect(() => {
+    if (!lobbyId) return;
+    let cancelled = false;
+    async function fetchPlayers() {
+      try {
+        const res = await fetch(`/api/games/${lobbyId}/players`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (cancelled) return;
+        setPlayers(Array.isArray(data.players) ? data.players : []);
+        setPlayersError(null);
+      } catch (e: any) {
+        if (!cancelled) setPlayersError(e.message || 'Failed to load players');
+      }
+    }
+    fetchPlayers();
+    const iv = setInterval(fetchPlayers, 3000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [lobbyId]);
 
   // Timer effect
   useEffect(() => {
@@ -189,6 +212,27 @@ export function GamePage() {
           </form>
         </div>
         <div className="w-full lg:w-80 xl:w-96 flex flex-col gap-2">
+          <Card>
+            <CardHeader className="py-3">
+              <CardTitle className="text-base">Lobby Players</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0 px-2 pb-2">
+              <ul className="max-h-48 overflow-auto divide-y rounded-md bg-background/60 text-sm">
+                {players.length === 0 && !playersError && (
+                  <li className="px-4 py-2 text-xs text-muted-foreground">No players yet.</li>
+                )}
+                {playersError && (
+                  <li className="px-4 py-2 text-xs text-destructive">{playersError}</li>
+                )}
+                {players.map(p => (
+                  <li key={p.name} className="px-4 py-2 flex items-center justify-between gap-3">
+                    <span className="font-medium truncate">{p.name}</span>
+                    <span className="text-xs tabular-nums text-muted-foreground">{p.score}</span>
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
           <Card className="flex-1 min-h-[400px]">
             <CardHeader className="py-3">
               <CardTitle className="text-base">Game Log</CardTitle>
