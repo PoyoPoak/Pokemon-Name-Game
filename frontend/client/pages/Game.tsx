@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from 'react-router-dom';
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,6 +17,12 @@ interface GuessLogEntry {
 }
 
 export function GamePage() {
+  const location = useLocation();
+  const params = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const lobbyId = params.get('lobby') || '';
+  const playerName = params.get('player') || '';
+  const [copied, setCopied] = useState(false);
+
   const [pokemonSet, setPokemonSet] = useState(DEFAULT_SET);
   const [guessedMap, setGuessedMap] = useState<Record<number, string>>({});
   const [input, setInput] = useState("");
@@ -112,8 +119,29 @@ export function GamePage() {
                   disabled={!running || timeLeft === 0}
                 />
               </div>
+              {lobbyId && (
+                <div className="flex flex-col items-center gap-1 self-end">
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground text-center">Lobby Code</span>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-8 px-3 text-sm font-mono"
+                      onClick={() => {
+                        navigator.clipboard.writeText(lobbyId).then(() => {
+                          setCopied(true);
+                          setTimeout(() => setCopied(false), 1200);
+                        });
+                      }}
+                    >
+                      {lobbyId}
+                    </Button>
+                    {copied && <span className="text-xs text-green-600 dark:text-green-400">Copied</span>}
+                  </div>
+                </div>
+              )}
               <div className="flex items-center gap-6">
-                <div className="text-left">
+                <div className="flex flex-col items-center text-center">
                   <div className="text-xs uppercase tracking-wide text-muted-foreground">Score</div>
                   <div className="text-3xl font-semibold tabular-nums">{guessedCount}/{total}</div>
                 </div>
