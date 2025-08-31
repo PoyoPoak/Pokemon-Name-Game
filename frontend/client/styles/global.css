@@ -1,0 +1,10 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Global styles & design tokens */
+html, body, #root {
+  height: 100%;
+}
+
+/* Add CSS variables or theme tokens here as needed */
