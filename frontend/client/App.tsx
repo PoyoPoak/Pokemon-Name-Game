@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 // Route-level pages
 import HomePage from "@/pages/Home";
 import NotFoundPage from "@/pages/NotFound";
+import GamePage from "@/pages/Game";
 
 // Example shared UI component (remove once you add real components)
 import { Placeholder } from "@/components/ui/Placeholder";
@@ -26,6 +27,7 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<HomePage />} />
+          <Route path="game" element={<GamePage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </BrowserRouter>
