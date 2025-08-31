@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -16,20 +17,44 @@ export function HomePage({ className }: { className?: string }) {
   const [username, setUsername] = useState("");
   const [code, setCode] = useState("");
   const [pending, setPending] = useState(false);
-  const [preview, setPreview] = useState<any | null>(null);
+  const [preview, setPreview] = useState<any | null>(null); // keep for debug display
+  const [error, setError] = useState<string | null>(null);
 
-  function submit(e: React.FormEvent) {
+  const navigate = useNavigate();
+
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
+    setError(null);
     setPending(true);
-    setTimeout(() => {
-      setPreview({
-        action: mode,
-        lobbyId: mode === 'create' ? Math.random().toString(36).slice(2,8) : code || 'demo123',
-        player: username || 'anon',
-        state: { started: false, timeLeft: 900, guessedCount: 0, total: 151 }
-      });
+    try {
+      let resp: Response;
+      if (mode === 'create') {
+        resp = await fetch('/api/games', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username })
+        });
+      } else {
+        resp = await fetch(`/api/games/${code}/join`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username })
+        });
+      }
+      const data = await resp.json();
+      if (!resp.ok) {
+        setError(data.error || 'Request failed');
+      } else {
+        setPreview(data); // debug
+        const lobbyId = data.lobbyId || code;
+        // Navigate to game page with query params for future state fetching
+        navigate(`/game?lobby=${encodeURIComponent(lobbyId)}&player=${encodeURIComponent(username)}`);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Network error');
+    } finally {
       setPending(false);
-    }, 500);
+    }
   }
 
   const disabled = !username || (mode === 'join' && !code) || pending;
@@ -64,6 +89,7 @@ export function HomePage({ className }: { className?: string }) {
                 {pending ? 'Please wait...' : (mode === 'create' ? 'Create Lobby' : 'Join Lobby')}
               </Button>
             </div>
+            {error && <div className="text-xs rounded-md bg-destructive/10 text-destructive p-2">{error}</div>}
             {preview && (
               <div className="text-xs rounded-md bg-muted/50 p-3 font-mono whitespace-pre-wrap">
                 {JSON.stringify(preview, null, 2)}
