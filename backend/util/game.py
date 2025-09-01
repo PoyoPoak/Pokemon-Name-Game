@@ -81,6 +81,10 @@ class Game:
 			cleaned = _clean_name(name)
 			self.clean_to_positions.setdefault(cleaned, []).append(pos)
 
+		# Shared guess log (list of dict events). Truncated to a max length when appended.
+		self.log: List[dict] = []
+		self.max_log_entries = 500
+
 	# ------------------------------------------------------------------
 	# Core timing
 	# ------------------------------------------------------------------
@@ -112,7 +116,6 @@ class Game:
 		  * 'restarted'      – had ended (time or completion) and was fully reset.
 		"""
 		if self.started and self.paused:
-			# Resume from pause using stored remaining seconds.
 			remaining = self.paused_remaining if self.paused_remaining is not None else self.duration_seconds
 			self.started_at = time.time()
 			self.ends_at = self.started_at + remaining
@@ -122,7 +125,6 @@ class Game:
 		if self.started and self.is_active():
 			return 'already_started'
 		if self.started and not self.is_active():
-			# Completed / timed out previously -> clean guess state but keep same duration.
 			self._reset_state()
 			status = 'restarted'
 		else:
@@ -145,10 +147,11 @@ class Game:
 			return 'not_started'
 		if self.paused:
 			return 'already_paused'
-		if not self.is_active():  # already finished
+		if not self.is_active(): 
 			return 'already_finished'
 		self.paused_remaining = self.time_left()
 		self.paused = True
+  
 		# Clear ends_at to reduce accidental misuse (resume reconstructs it).
 		self.ends_at = None
 		return 'paused'
@@ -157,54 +160,42 @@ class Game:
 	# Guess handling
 	# ------------------------------------------------------------------
 	def submit_guess(self, player: str, raw_guess: str) -> Dict[str, object]:
-		"""Handle a user guess.
+		"""Handle a user guess with validation & logging.
 
-		NOTE: `player` is currently unused for scoring; future enhancement could
-		attribute positions or maintain per‑player stats.
-
-		Validation order yields early exits for cheap checks:
-		  1. Game not started / already over.
-		  2. Empty / whitespace input.
-		  3. Duplicate normalized token.
-		  4. Not found in mapping.
-
-		Multi‑position resolution: if a cleaned token maps to multiple positions
-		(future forms), all unguessed positions are filled.
+		Returns result dict (accepted flag, metadata) plus logs the attempt.
 		"""
 		if not self.started:
-			return {"accepted": False, "reason": "not_started"}
+			return self._log_event(player, raw_guess, {"accepted": False, "reason": "not_started"})
 		if not self.is_active():
-			return {"accepted": False, "reason": "game_over"}
+			return self._log_event(player, raw_guess, {"accepted": False, "reason": "game_over"})
 
 		guess_clean = _clean_name(raw_guess)
 		if not guess_clean:
-			return {"accepted": False, "reason": "empty"}
+			return self._log_event(player, raw_guess, {"accepted": False, "reason": "empty"})
 		if guess_clean in self.guessed_clean:
-			return {"accepted": False, "reason": "duplicate"}
+			return self._log_event(player, raw_guess, {"accepted": False, "reason": "duplicate"})
 
 		positions = self.clean_to_positions.get(guess_clean)
 		if not positions:
-			return {"accepted": False, "reason": "not_found"}
+			return self._log_event(player, raw_guess, {"accepted": False, "reason": "not_found"})
 
 		accepted_positions: List[int] = []
 		for pos in positions:
 			if pos in self.guessed:
-				continue  # already filled by earlier multi‑form guess
+				continue
 			name = self.remaining.get(pos)
 			if name:
 				self.guessed[pos] = name
 				self.remaining.pop(pos, None)
 				accepted_positions.append(pos)
 
-		# Track normalized form so repeated user attempts are rejected quickly.
 		self.guessed_clean.add(guess_clean)
 		total = len(self.guessed)
 		done = total >= len(self.original_list)
 		if done:
-			# End immediately: downstream timers / polling will see time_left = 0.
 			self.ends_at = time.time()
 
-		return {
+		result = {
 			"accepted": True,
 			"positions": accepted_positions,
 			"normalized": guess_clean,
@@ -212,9 +203,10 @@ class Game:
 			"remaining": len(self.original_list) - total,
 			"complete": done,
 		}
+		return self._log_event(player, raw_guess, result)
 
 	# ------------------------------------------------------------------
-	# State / serialization 
+	# State / serialization
 	# ------------------------------------------------------------------
 	def summary(self) -> Dict[str, object]:
 		"""Compact state used by most polling endpoints."""
@@ -230,12 +222,12 @@ class Game:
 		}
 
 	def detailed_state(self) -> Dict[str, object]:
-		"""Expanded state including full guessed mapping (position -> name)."""
+		"""Expanded state including full guessed mapping and shared log."""
 		return {
 			**self.summary(),
 			"guessed": self.guessed,  # {position: name}
+			"log": list(self.log),
 		}
-
 	# ------------------------------------------------------------------
 	# Reset / admin
 	# ------------------------------------------------------------------
@@ -252,6 +244,31 @@ class Game:
 		for pos, name in self.remaining.items():
 			cleaned = _clean_name(name)
 			self.clean_to_positions.setdefault(cleaned, []).append(pos)
+		self.log.clear()
+
+	def _log_event(self, player: str, raw_guess: str, result: Dict[str, object]) -> Dict[str, object]:
+		"""Internal helper: append an event to shared log and return enriched result.
+
+		Event shape: {id, ts, player, guess, accepted, reason?, positions?}
+		"""
+		import uuid  # local import to avoid module-level cost if unused
+		entry = {
+			"id": uuid.uuid4().hex,
+			"ts": time.time(),
+			"player": player or "",
+			"guess": raw_guess,
+			"accepted": bool(result.get("accepted")),
+			"reason": result.get("reason"),
+			"positions": result.get("positions", []),
+		}
+		self.log.append(entry)
+		if len(self.log) > self.max_log_entries:
+			# Keep most recent entries
+			self.log = self.log[-self.max_log_entries:]
+		# Return result including the event for immediate client consumption
+		result_with_event = dict(result)
+		result_with_event["event"] = entry
+		return result_with_event
 
 
 # Global in‑memory registry of games (lobby_id -> Game)

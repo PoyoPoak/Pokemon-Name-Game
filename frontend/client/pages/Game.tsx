@@ -12,8 +12,9 @@ interface GuessLogEntry {
   id: string;
   player: string;
   guess: string;
-  result: "pending" | "correct" | "duplicate" | "not_found";
+  result: "correct" | "duplicate" | "not_found" | "game_over" | "not_started" | "empty";
   at: number; // epoch ms
+  positions?: number[];
 }
 
 export function GamePage() {
@@ -35,7 +36,9 @@ export function GamePage() {
   const lastServerRef = useRef<{ timeLeft: number; fetchedAt: number } | null>(null);
   const monotonicRef = useRef<number | null>(null); // never allow countdown to increase
   const [now, setNow] = useState(Date.now());
-  const [log, setLog] = useState<GuessLogEntry[]>([]);
+  const [log, setLog] = useState<GuessLogEntry[]>([]); // existing log; not focus per request
+  const [guessError, setGuessError] = useState<string | null>(null);
+  const submittingRef = useRef(false);
   const [players, setPlayers] = useState<{ name: string; score: number }[]>([]);
   const [playersError, setPlayersError] = useState<string | null>(null);
 
@@ -104,6 +107,29 @@ export function GamePage() {
         // integrate guessed map if provided
         if (game?.guessed && typeof game.guessed === 'object') {
           setGuessedMap(game.guessed);
+        }
+        // sync shared log (convert server shape to GuessLogEntry)
+        if (Array.isArray(game?.log)) {
+          setLog(prev => {
+            // Avoid re-adding identical sequence (simple length & last id heuristic)
+            if (prev.length && game.log.length >= prev.length) {
+              const lastPrev = prev[0];
+              const lastNew = game.log[game.log.length - 1];
+              if (lastPrev && lastNew && lastPrev.id === lastNew.id && game.log.length === prev.length) {
+                return prev; // unchanged
+              }
+            }
+            // Server log oldest->newest; we store newest first
+            const mapped: GuessLogEntry[] = game.log.slice(-500).map((e: any) => ({
+              id: e.id,
+              player: e.player || '',
+              guess: e.guess,
+              result: e.accepted ? 'correct' : (e.reason || 'not_found'),
+              at: Math.floor((e.ts || Date.now()) * 1000),
+              positions: e.positions || []
+            })).reverse();
+            return mapped;
+          });
         }
       } catch (e: any) {
         if (!cancelled) setStateError(e.message || 'Failed to fetch state');
@@ -195,32 +221,63 @@ export function GamePage() {
     return `${m}:${s}`;
   }, [timeLeft]);
 
-  // Handle local guess submission (mock evaluation only)
-  const submitGuess = useCallback((e?: React.FormEvent) => {
+  // Submit guess to backend
+  const submitGuess = useCallback(async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (!running || paused || timeLeft <= 0) return;
     const raw = input.trim();
-    if (!raw) return;
-    const normalized = raw.toLowerCase();
-    // Mock: consider any non-empty unique guess as correct until full integration
-    const already = Object.values(guessedMap).some(g => g === normalized);
-    const entry: GuessLogEntry = {
-      id: crypto.randomUUID(),
-      player: "you", // later: actual player
-      guess: raw,
-      result: already ? "duplicate" : "correct",
-      at: Date.now()
-    };
-  // Uncapped log (scrollable container). Consider pruning server-side later.
-  setLog(prev => [entry, ...prev]);
-    if (!already) {
-      // Assign next empty slot in set
-      const empty = pokemonSet.find(p => !guessedMap[p.index]);
-      if (empty) {
-        setGuessedMap(g => ({ ...g, [empty.index]: raw }));
+    if (!raw || !lobbyId || !playerName) return;
+    if (submittingRef.current) return; // simple in-flight guard
+    submittingRef.current = true;
+    setGuessError(null);
+    try {
+      const res = await fetch(`/api/games/${lobbyId}/guess`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ guess: raw, player: playerName })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.accepted) {
+        setGuessError(data.reason || 'rejected');
+        if (data.event) {
+          setLog(prev => [{
+            id: data.event.id,
+            player: data.event.player || playerName,
+            guess: data.event.guess,
+            result: data.event.accepted ? 'correct' : (data.event.reason || 'not_found'),
+            at: Math.floor((data.event.ts || Date.now()) * 1000),
+            positions: data.event.positions || []
+          }, ...prev]);
+        }
+        return;
       }
+      // Optimistically update guessedMap with user-entered name for returned positions
+      if (Array.isArray(data.positions)) {
+        setGuessedMap(g => {
+          const next = { ...g };
+          for (const pos of data.positions) {
+            if (!next[pos]) next[pos] = raw; // will be replaced with canonical name on next poll
+          }
+          return next;
+        });
+      }
+      if (data.event) {
+        setLog(prev => [{
+          id: data.event.id,
+          player: data.event.player || playerName,
+          guess: data.event.guess,
+          result: data.event.accepted ? 'correct' : (data.event.reason || 'not_found'),
+          at: Math.floor((data.event.ts || Date.now()) * 1000),
+          positions: data.event.positions || []
+        }, ...prev]);
+      }
+    } catch (err: any) {
+      setGuessError(err.message || 'network_error');
+    } finally {
+      submittingRef.current = false;
+      setInput('');
     }
-    setInput("");
-  }, [input, guessedMap, pokemonSet]);
+  }, [input, lobbyId, playerName, running, paused, timeLeft]);
 
   // Force exactly 4 columns regardless of set size
   const COLUMNS = 4;
@@ -239,11 +296,12 @@ export function GamePage() {
                 <label htmlFor="guess" className="text-sm font-medium">Enter Pokémon species:</label>
                 <Input
                   id="guess"
-                  placeholder="Start typing..."
+                  placeholder={running ? "Start typing..." : paused ? "Paused" : "Start the game first"}
                   value={input}
                   onChange={e => setInput(e.target.value)}
-                  disabled={!running || timeLeft === 0}
+                  disabled={!running || timeLeft === 0 || submittingRef.current}
                 />
+                {guessError && <span className="text-[10px] text-destructive">{guessError}</span>}
               </div>
               {lobbyId && (
                 <div className="flex flex-col items-center gap-1 self-end">
