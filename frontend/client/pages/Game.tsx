@@ -413,16 +413,16 @@ export function GamePage() {
             </CardContent>
           </Card>
           <Card className="flex-1 min-h-[400px]">
-            <CardHeader className="py-3">
+            <CardHeader className="py-3 px-6">
               <CardTitle className="text-base">Game Log</CardTitle>
             </CardHeader>
-            <CardContent className="p-0">
-              <ul className="text-sm max-h-[600px] overflow-auto divide-y">
+            <CardContent className="pt-0 pb-4 px-6">
+              <ul className="text-sm max-h-[600px] overflow-auto divide-y -mx-6 px-6 pb-1">
                 {log.length === 0 && (
-                  <li className="p-3 text-muted-foreground text-xs">No guesses yet. Guesses will appear here.</li>
+                  <li className="py-2 text-muted-foreground text-xs">No guesses yet. Guesses will appear here.</li>
                 )}
                 {log.map(entry => (
-                  <li key={entry.id} className="px-3 py-2 flex items-start gap-2">
+                  <li key={entry.id} className="py-2 flex items-start gap-2">
                     <span className="text-xs tabular-nums text-muted-foreground w-14">{new Date(entry.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
                     <span className="font-semibold">{entry.player}</span>
                     <span className="flex-1 break-words">{entry.guess}</span>
