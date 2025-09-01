@@ -1,7 +1,16 @@
 """Game controller: maintains game state, timer, and guess processing.
 
-This is an in‑memory implementation suitable for early development.
-Later: persist to Redis / DB + push updates via WS/SSE.
+High‑level responsibilities:
+	* Manage a single lobby's timed session (start, pause/resume, restart).
+	* Track which Pokémon have been guessed (by Pokédex position) and which remain.
+	* Perform normalization / cleaning of user guesses and resolve to one or more positions.
+	* Produce compact (`summary`) and detailed (`detailed_state`) serializable views for APIs.
+
+Current implementation is **in‑memory** (process‑local) and meant for early development.
+Future enhancements (out of scope here):
+	* External persistence (Redis / database) for horizontal scaling & durability.
+	* Pub/Sub or WS/SSE pushing instead of client polling.
+	* Per‑player scoring & attribution (only raw guess acceptance handled now).
 """
 
 from __future__ import annotations
@@ -14,27 +23,59 @@ from data.pokemon_data import GENERATION_1
 
 
 def _clean_name(name: str) -> str:
+	"""Normalize a Pokémon name / user guess for comparison.
+
+	Steps:
+		* Remove any non‑alphabetic characters.
+		* Lowercase.
+		* Strip surrounding whitespace.
+	This allows accepting variations like "Mr. Mime" vs "mrmime".
+	"""
 	return re.sub(r"[^a-zA-Z]", "", name).lower().strip()
 
 
 class Game:
-	"""Single lobby game instance."""
+	"""Single lobby game instance.
+
+	Timing model:
+		* When created, the game is "not started"; `time_left` reports full duration.
+		* `start()` sets `started = True` and establishes `ends_at`.
+		* `pause()` captures remaining seconds in `paused_remaining` and nulls `ends_at`.
+		* Resuming (calling `start()` while paused) recalculates a new `ends_at` based on
+			the stored remaining seconds.
+		* If the game finished (timer hit 0 or all Pokémon guessed), a subsequent `start()`
+			acts as a full restart (guesses cleared).
+
+	Guess model:
+		* `remaining` maps position -> canonical name still unguessed.
+		* `guessed` maps position -> canonical name guessed.
+		* `guessed_clean` stores cleaned (normalized) forms to quickly reject duplicates.
+		* `clean_to_positions` precomputes which Pokédex positions share the same cleaned
+			token (covers edge cases of alternate forms / spacing, though Gen 1 is simple).
+	"""
 
 	def __init__(self, lobby_id: str, duration_seconds: int = 15 * 60):
+		# Identifiers / metadata
 		self.lobby_id = lobby_id
-		self.duration_seconds = duration_seconds
+		self.duration_seconds = duration_seconds  # total allotted time for session
 		self.created_at = time.time()
-		self.started = False
-		self.paused = False
-		self.started_at: float | None = None
-		self.ends_at: float | None = None
-		self.paused_remaining: int | None = None
 
-		# Pokemon data
+		# Timing state
+		self.started = False          # Has the game ever been started? (affects restart logic)
+		self.paused = False           # Currently paused flag
+		self.started_at: float | None = None  # Wall time when (last) started/resumed
+		self.ends_at: float | None = None     # Wall time when current run should end
+		self.paused_remaining: int | None = None  # Seconds remaining captured at pause
+
+		# Pokémon data (Gen 1 full list). For a future multi‑gen mode, original_list could vary.
 		self.original_list: List[str] = GENERATION_1
+
+		# Dynamic collections partition original_list into remaining vs guessed positions.
 		self.remaining: Dict[int, str] = {i + 1: n for i, n in enumerate(self.original_list)}
 		self.guessed: Dict[int, str] = {}
 		self.guessed_clean: Set[str] = set()
+
+		# Mapping from cleaned token -> list of positions (handles multi‑form names or variants).
 		self.clean_to_positions: Dict[str, List[int]] = {}
 		for pos, name in self.remaining.items():
 			cleaned = _clean_name(name)
@@ -44,6 +85,13 @@ class Game:
 	# Core timing
 	# ------------------------------------------------------------------
 	def time_left(self) -> int:
+		"""Return remaining time (integer seconds) respecting pause & pre‑start states.
+
+		Priority order:
+		  1. If paused, return the frozen `paused_remaining` snapshot.
+		  2. If never started (or ends_at cleared), report full duration.
+		  3. Otherwise, compute `ends_at - now` clamped at >= 0.
+		"""
 		if self.paused and self.paused_remaining is not None:
 			return self.paused_remaining
 		if not self.started or self.ends_at is None:
@@ -51,16 +99,20 @@ class Game:
 		return max(0, int(self.ends_at - time.time()))
 
 	def is_active(self) -> bool:
+		"""Whether the game is currently running (started, not paused, time > 0)."""
 		return self.started and (not self.paused) and self.time_left() > 0
 
 	def start(self) -> str:
-		"""Start or restart the game.
+		"""Start, resume, or restart the game.
 
-		Returns a status string: 'started', 'already_started', or 'restarted'.
-		If previously ended, this will reset guesses and start fresh.
+		Returns one of:
+		  * 'started'        – first time starting.
+		  * 'already_started'– already running (no state change).
+		  * 'resumed'        – unpaused with remaining time restored.
+		  * 'restarted'      – had ended (time or completion) and was fully reset.
 		"""
 		if self.started and self.paused:
-			# resume
+			# Resume from pause using stored remaining seconds.
 			remaining = self.paused_remaining if self.paused_remaining is not None else self.duration_seconds
 			self.started_at = time.time()
 			self.ends_at = self.started_at + remaining
@@ -70,7 +122,7 @@ class Game:
 		if self.started and self.is_active():
 			return 'already_started'
 		if self.started and not self.is_active():
-			# previously ended; restart fully
+			# Completed / timed out previously -> clean guess state but keep same duration.
 			self._reset_state()
 			status = 'restarted'
 		else:
@@ -81,7 +133,14 @@ class Game:
 		return status
 
 	def pause(self) -> str:
-		"""Pause the game (freeze timer)."""
+		"""Pause the game (freeze timer) capturing remaining seconds.
+
+		Returns:
+		  * 'not_started'     – cannot pause before first start.
+		  * 'already_paused'  – idempotent.
+		  * 'already_finished'– game already ended (time or completion).
+		  * 'paused'          – success.
+		"""
 		if not self.started:
 			return 'not_started'
 		if self.paused:
@@ -90,7 +149,7 @@ class Game:
 			return 'already_finished'
 		self.paused_remaining = self.time_left()
 		self.paused = True
-		# Do not modify ends_at; just for clarity set it to None so is_active won't rely on it
+		# Clear ends_at to reduce accidental misuse (resume reconstructs it).
 		self.ends_at = None
 		return 'paused'
 
@@ -98,10 +157,25 @@ class Game:
 	# Guess handling
 	# ------------------------------------------------------------------
 	def submit_guess(self, player: str, raw_guess: str) -> Dict[str, object]:
+		"""Handle a user guess.
+
+		NOTE: `player` is currently unused for scoring; future enhancement could
+		attribute positions or maintain per‑player stats.
+
+		Validation order yields early exits for cheap checks:
+		  1. Game not started / already over.
+		  2. Empty / whitespace input.
+		  3. Duplicate normalized token.
+		  4. Not found in mapping.
+
+		Multi‑position resolution: if a cleaned token maps to multiple positions
+		(future forms), all unguessed positions are filled.
+		"""
 		if not self.started:
 			return {"accepted": False, "reason": "not_started"}
 		if not self.is_active():
 			return {"accepted": False, "reason": "game_over"}
+
 		guess_clean = _clean_name(raw_guess)
 		if not guess_clean:
 			return {"accepted": False, "reason": "empty"}
@@ -122,11 +196,13 @@ class Game:
 				self.remaining.pop(pos, None)
 				accepted_positions.append(pos)
 
+		# Track normalized form so repeated user attempts are rejected quickly.
 		self.guessed_clean.add(guess_clean)
 		total = len(self.guessed)
 		done = total >= len(self.original_list)
 		if done:
-			self.ends_at = time.time()  # end immediately
+			# End immediately: downstream timers / polling will see time_left = 0.
+			self.ends_at = time.time()
 
 		return {
 			"accepted": True,
@@ -141,6 +217,7 @@ class Game:
 	# State / serialization 
 	# ------------------------------------------------------------------
 	def summary(self) -> Dict[str, object]:
+		"""Compact state used by most polling endpoints."""
 		return {
 			"lobbyId": self.lobby_id,
 			"duration": self.duration_seconds,
@@ -153,6 +230,7 @@ class Game:
 		}
 
 	def detailed_state(self) -> Dict[str, object]:
+		"""Expanded state including full guessed mapping (position -> name)."""
 		return {
 			**self.summary(),
 			"guessed": self.guessed,  # {position: name}
@@ -162,10 +240,11 @@ class Game:
 	# Reset / admin
 	# ------------------------------------------------------------------
 	def reset(self) -> None:
+		"""Hard reset: reconstruct object while retaining lobby id & duration."""
 		self.__init__(self.lobby_id, self.duration_seconds)
 
 	def _reset_state(self) -> None:
-		# internal: only reset guess-related structures
+		"""Internal partial reset (used for full game restart without reallocation)."""
 		self.remaining = {i + 1: n for i, n in enumerate(self.original_list)}
 		self.guessed = {}
 		self.guessed_clean = set()
@@ -180,6 +259,10 @@ GAMES: Dict[str, Game] = {}
 
 
 def get_or_create_game(lobby_id: str, duration_seconds: int = 15 * 60) -> Game:
+	"""Fetch existing game for lobby or create a new one with given duration.
+
+	Duration parameter only applies if creating a new instance.
+	"""
 	game = GAMES.get(lobby_id)
 	if game is None:
 		game = Game(lobby_id, duration_seconds)
