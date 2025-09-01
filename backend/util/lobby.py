@@ -27,7 +27,10 @@ class Lobby:
 		return self.players.values()
 
 	def add_score(self, user: str, delta: int = 1) -> int:
-		u = self.add_player(user)
+		# Increment score for an existing player; create if missing.
+		u = self.players.get(user)
+		if u is None:
+			u = self.add_player(user)
 		return u.add_score(delta)
 
 	def reset_all(self) -> None:

@@ -79,7 +79,8 @@ export function GamePage() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (cancelled) return;
-        const game = data.game || data.state || data; // flexible shape
+  const game = data.game || data.state || data; // flexible shape
+  const lobby = data.lobby;
         if (game?.duration) setDuration(game.duration);
         const startedFlag = !!game?.started;
         const pausedFlag = !!game?.paused;
@@ -107,6 +108,10 @@ export function GamePage() {
         // integrate guessed map if provided
         if (game?.guessed && typeof game.guessed === 'object') {
           setGuessedMap(game.guessed);
+        }
+        // update players from lobby (authoritative) if present
+        if (lobby && Array.isArray(lobby.players)) {
+          setPlayers(lobby.players);
         }
         // sync shared log (convert server shape to GuessLogEntry)
         if (Array.isArray(game?.log)) {
@@ -260,6 +265,13 @@ export function GamePage() {
           }
           return next;
         });
+      }
+      // Update players scores if server provided
+      if (Array.isArray(data.players)) {
+        setPlayers(data.players);
+      } else {
+        // Fallback optimistic increment for the current player
+        setPlayers(prev => prev.map(p => p.name === playerName ? { ...p, score: p.score + 1 } : p));
       }
       if (data.event) {
         setLog(prev => [{

@@ -65,6 +65,17 @@ def submit_guess(lobby_id: str):
     if not game:
         return jsonify({'error': 'game_not_found'}), 404
     result = game.submit_guess(player, guess)
+    # If accepted, increment that player's score in lobby
+    if result.get('accepted'):
+        lobby = _get_lobby(lobby_id)
+        if lobby and player:
+            lobby.add_score(player, 1)
+            # include updated lobby players for immediate UI refresh
+            result['players'] = lobby.to_dict().get('players', [])
+            try:
+                print(f"[DEBUG] Score update: lobby={lobby_id} player={player} score={lobby.get_player(player).score}")
+            except Exception:
+                pass
     return jsonify(result), (200 if result.get('accepted') else 400)
 
 
