@@ -25,8 +25,10 @@ class Game:
 		self.duration_seconds = duration_seconds
 		self.created_at = time.time()
 		self.started = False
+		self.paused = False
 		self.started_at: float | None = None
 		self.ends_at: float | None = None
+		self.paused_remaining: int | None = None
 
 		# Pokemon data
 		self.original_list: List[str] = GENERATION_1
@@ -42,12 +44,14 @@ class Game:
 	# Core timing
 	# ------------------------------------------------------------------
 	def time_left(self) -> int:
+		if self.paused and self.paused_remaining is not None:
+			return self.paused_remaining
 		if not self.started or self.ends_at is None:
 			return self.duration_seconds
 		return max(0, int(self.ends_at - time.time()))
 
 	def is_active(self) -> bool:
-		return self.started and self.time_left() > 0
+		return self.started and (not self.paused) and self.time_left() > 0
 
 	def start(self) -> str:
 		"""Start or restart the game.
@@ -55,10 +59,18 @@ class Game:
 		Returns a status string: 'started', 'already_started', or 'restarted'.
 		If previously ended, this will reset guesses and start fresh.
 		"""
+		if self.started and self.paused:
+			# resume
+			remaining = self.paused_remaining if self.paused_remaining is not None else self.duration_seconds
+			self.started_at = time.time()
+			self.ends_at = self.started_at + remaining
+			self.paused = False
+			self.paused_remaining = None
+			return 'resumed'
 		if self.started and self.is_active():
 			return 'already_started'
 		if self.started and not self.is_active():
-			# treat as restart (reset state first)
+			# previously ended; restart fully
 			self._reset_state()
 			status = 'restarted'
 		else:
@@ -67,6 +79,20 @@ class Game:
 		self.started_at = time.time()
 		self.ends_at = self.started_at + self.duration_seconds
 		return status
+
+	def pause(self) -> str:
+		"""Pause the game (freeze timer)."""
+		if not self.started:
+			return 'not_started'
+		if self.paused:
+			return 'already_paused'
+		if not self.is_active():  # already finished
+			return 'already_finished'
+		self.paused_remaining = self.time_left()
+		self.paused = True
+		# Do not modify ends_at; just for clarity set it to None so is_active won't rely on it
+		self.ends_at = None
+		return 'paused'
 
 	# ------------------------------------------------------------------
 	# Guess handling
@@ -112,7 +138,7 @@ class Game:
 		}
 
 	# ------------------------------------------------------------------
-	# State / serialization
+	# State / serialization 
 	# ------------------------------------------------------------------
 	def summary(self) -> Dict[str, object]:
 		return {
@@ -123,6 +149,7 @@ class Game:
 			"guessedCount": len(self.guessed),
 			"isActive": self.is_active(),
 			"started": self.started,
+			"paused": self.paused,
 		}
 
 	def detailed_state(self) -> Dict[str, object]:

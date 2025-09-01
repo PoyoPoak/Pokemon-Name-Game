@@ -94,6 +94,19 @@ def start_game(lobby_id: str):
     status = game.start()
     return jsonify({'status': status, 'state': game.summary()})
 
+def pause_game(lobby_id: str):
+    game = GAMES.get(lobby_id)
+    if not game:
+        return jsonify({'error': 'game_not_found'}), 404
+    status = game.pause()
+    return jsonify({'status': status, 'state': game.summary()})
+
+def resume_game(lobby_id: str):
+    game = GAMES.get(lobby_id)
+    if not game:
+        return jsonify({'error': 'game_not_found'}), 404
+    status = game.resume()
+    return jsonify({'status': status, 'state': game.summary()})
 
 RouteBuilder(bp) \
     .route('/games') \
@@ -135,4 +148,16 @@ RouteBuilder(bp) \
     .route('/games/<lobby_id>/start') \
     .methods('POST') \
     .handler(start_game) \
+    .build()
+
+RouteBuilder(bp) \
+    .route('/games/<lobby_id>/pause') \
+    .methods('POST') \
+    .handler(pause_game) \
+    .build()
+
+RouteBuilder(bp) \
+    .route('/games/<lobby_id>/resume') \
+    .methods('POST') \
+    .handler(resume_game) \
     .build()

@@ -26,9 +26,14 @@ export function GamePage() {
   const [pokemonSet, setPokemonSet] = useState(DEFAULT_SET);
   const [guessedMap, setGuessedMap] = useState<Record<number, string>>({});
   const [input, setInput] = useState("");
-  const [running, setRunning] = useState(false);
-  const [duration] = useState(15 * 60); // seconds (configurable later)
-  const [startTs, setStartTs] = useState<number | null>(null);
+  const [running, setRunning] = useState(false); // reflects server started & not paused & active
+  const [paused, setPaused] = useState(false);
+  const [started, setStarted] = useState(false);
+  const [duration, setDuration] = useState(15 * 60); // seconds (updated from server)
+  const [startTs, setStartTs] = useState<number | null>(null); // derived from server snapshot
+  const [stateError, setStateError] = useState<string | null>(null);
+  const lastServerRef = useRef<{ timeLeft: number; fetchedAt: number } | null>(null);
+  const monotonicRef = useRef<number | null>(null); // never allow countdown to increase
   const [now, setNow] = useState(Date.now());
   const [log, setLog] = useState<GuessLogEntry[]>([]);
   const [players, setPlayers] = useState<{ name: string; score: number }[]>([]);
@@ -55,30 +60,128 @@ export function GamePage() {
     return () => { cancelled = true; clearInterval(iv); };
   }, [lobbyId]);
 
-  // Timer effect
+  // Tick every second for countdown animation
   useEffect(() => {
-    if (!running) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [running]);
+  }, []);
+
+  // Poll game state (every 2s)
+  useEffect(() => {
+    if (!lobbyId) return;
+    let cancelled = false;
+    async function fetchState() {
+      try {
+        const res = await fetch(`/api/games/${lobbyId}/state`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (cancelled) return;
+        const game = data.game || data.state || data; // flexible shape
+        if (game?.duration) setDuration(game.duration);
+        const startedFlag = !!game?.started;
+        const pausedFlag = !!game?.paused;
+        if (typeof game?.timeLeft === 'number') {
+          const serverLeft = game.timeLeft;
+          const prev = monotonicRef.current;
+          if (pausedFlag) {
+            monotonicRef.current = serverLeft;
+            lastServerRef.current = { timeLeft: serverLeft, fetchedAt: Date.now() };
+          } else if (prev == null || serverLeft < prev || prev - serverLeft > 2) {
+            monotonicRef.current = serverLeft;
+            lastServerRef.current = { timeLeft: serverLeft, fetchedAt: Date.now() };
+          } else if (lastServerRef.current) {
+            lastServerRef.current.fetchedAt = Date.now();
+          }
+        }
+        setPaused(pausedFlag);
+  setStarted(startedFlag);
+        setRunning(startedFlag && !pausedFlag && (game.timeLeft ?? 0) > 0);
+        if (startedFlag && startTs == null && typeof game?.timeLeft === 'number') {
+          // derive server startTs = now - (duration - timeLeft)
+          setStartTs(Date.now() - (game.duration - game.timeLeft) * 1000);
+        }
+        setStateError(null);
+        // integrate guessed map if provided
+        if (game?.guessed && typeof game.guessed === 'object') {
+          setGuessedMap(game.guessed);
+        }
+      } catch (e: any) {
+        if (!cancelled) setStateError(e.message || 'Failed to fetch state');
+      }
+    }
+    fetchState();
+    const iv = setInterval(fetchState, 2000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [lobbyId, startTs]);
 
   const timeLeft = useMemo(() => {
+    // Prefer server snapshot drifted by local elapsed since fetched
+    if (!started) {
+      // Pre-start: show full duration from server (no drift / countdown)
+      if (lastServerRef.current) return lastServerRef.current.timeLeft;
+      return duration;
+    }
+    if (paused) {
+      // While paused, freeze at last monotonic value or snapshot
+      if (monotonicRef.current != null) return monotonicRef.current;
+      if (lastServerRef.current) return lastServerRef.current.timeLeft;
+      return duration;
+    }
+    if (lastServerRef.current && monotonicRef.current != null) {
+      const { timeLeft: snapshotLeft, fetchedAt } = lastServerRef.current;
+      const drift = (now - fetchedAt) / 1000;
+      const calc = Math.max(0, Math.ceil(snapshotLeft - drift));
+      // Enforce monotonic non-increase
+      if (calc <= monotonicRef.current) {
+        monotonicRef.current = calc;
+      }
+      return monotonicRef.current;
+    }
     if (!startTs) return duration;
     const elapsed = (now - startTs) / 1000;
     return Math.max(0, Math.ceil(duration - elapsed));
-  }, [startTs, now, duration]);
+  }, [now, duration, startTs]);
 
   useEffect(() => {
     if (timeLeft === 0 && running) setRunning(false);
   }, [timeLeft, running]);
 
-  const toggleTimer = () => {
-    if (running) {
-      setRunning(false);
-    } else {
-      const firstStart = startTs == null;
-      if (firstStart) setStartTs(Date.now());
-      setRunning(true);
+  const startGame = async () => {
+    if (!lobbyId) return;
+    try {
+      const res = await fetch(`/api/games/${lobbyId}/start`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to start');
+      const state = data.state || data.game || data;
+      if (state?.duration) setDuration(state.duration);
+      if (typeof state?.timeLeft === 'number') {
+        lastServerRef.current = { timeLeft: state.timeLeft, fetchedAt: Date.now() };
+        setStartTs(Date.now() - (state.duration - state.timeLeft) * 1000);
+      }
+  setPaused(false);
+  setStarted(true);
+  setRunning(true);
+      setStateError(null);
+    } catch (e: any) {
+      setStateError(e.message || 'Start failed');
+    }
+  };
+
+  const pauseGame = async () => {
+    if (!lobbyId) return;
+    try {
+      const res = await fetch(`/api/games/${lobbyId}/pause`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to pause');
+      const state = data.state || data.game || data;
+      if (typeof state?.timeLeft === 'number') {
+        lastServerRef.current = { timeLeft: state.timeLeft, fetchedAt: Date.now() };
+      }
+  setPaused(true);
+  setRunning(false); // treat paused as not running for input disable
+      setStateError(null);
+    } catch (e: any) {
+      setStateError(e.message || 'Pause failed');
     }
   };
 
@@ -170,15 +273,33 @@ export function GamePage() {
                 </div>
                 <div className="flex flex-col items-center">
                   <div className="flex items-center gap-3">
-                    <Button type="button" variant={running ? 'secondary' : 'default'} onClick={toggleTimer} className="h-9 px-3">
-                      {running ? 'Pause' : 'Start'}
-                    </Button>
+          {!running ? (
+                      <Button
+                        type="button"
+                        variant='default'
+                        onClick={startGame}
+                        disabled={!lobbyId}
+                        className="h-9 px-3"
+                      >
+            {startTs && paused ? 'Resume' : 'Start'}
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant='secondary'
+                        onClick={pauseGame}
+                        className="h-9 px-3"
+                      >
+                        Pause
+                      </Button>
+                    )}
                     <div className="flex flex-col items-center w-[80px] text-center">
                       <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Remaining</span>
                       <span className="text-3xl font-semibold tabular-nums leading-none">{timeStr}</span>
                     </div>
                   </div>
                   {/* Give Up button removed per request */}
+                  {stateError && <span className="mt-1 text-[10px] text-destructive">{stateError}</span>}
                 </div>
               </div>
             </div>
