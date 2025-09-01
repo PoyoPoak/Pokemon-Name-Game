@@ -1,3 +1,25 @@
+## Deployment (Railway)
+
+### Quick Deploy
+1. Ensure repository contains added `Dockerfile` and `backend/wsgi.py` (already included).
+2. Push changes to your default branch.
+3. In Railway: New Project -> Deploy from GitHub -> select this repo.
+4. Railway auto-detects the Dockerfile and builds multi-stage image.
+5. After deploy, open the URL: `/api/health` should return JSON; root serves the React build.
+
+### Local Docker Test
+```
+docker build -t pokemon-game .
+docker run -p 8000:8000 pokemon-game
+```
+Visit http://localhost:8000
+
+### Environment Notes
+In-memory state (lobbies, games) resets on redeploy or container restart. For persistence, add Redis and refactor storage.
+
+### Scaling
+Single process (3 Gunicorn workers). Horizontal scaling would require shared state (Redis) + possibly WebSockets/SSE for realtime.
+
 # Flask-App
 My personal template for creating for flask web application monorepos. Includes backend and frontend frameworks.
 

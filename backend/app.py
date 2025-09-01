@@ -50,6 +50,27 @@ app.register_blueprint(game_bp, url_prefix="/api")
 
 
 # ---------------------------------------------------------------------------
+# Static frontend (built SPA). In container, FRONTEND_DIST is copied in build.
+# ---------------------------------------------------------------------------
+FRONTEND_DIST = os.path.abspath(os.environ.get("FRONTEND_DIST", os.path.join(os.path.dirname(__file__), "..", "frontend_dist")))
+
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve_spa(path: str):  # pragma: no cover (simple file serving)
+    # Only handle non-API routes
+    if path.startswith('api/'):
+        abort(404)
+    if os.path.isdir(FRONTEND_DIST):
+        full_path = os.path.join(FRONTEND_DIST, path)
+        if path and os.path.exists(full_path) and os.path.isfile(full_path):
+            return send_from_directory(FRONTEND_DIST, path)
+        index_path = os.path.join(FRONTEND_DIST, 'index.html')
+        if os.path.exists(index_path):
+            return send_from_directory(FRONTEND_DIST, 'index.html')
+    return "Frontend build not found", 503
+
+
+# ---------------------------------------------------------------------------
 # Utility helpers
 # ---------------------------------------------------------------------------
 def open_browser(url: str, delay: float = 1.0) -> None:
