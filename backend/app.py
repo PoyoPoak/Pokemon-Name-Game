@@ -16,7 +16,6 @@ import sys
 import threading
 import webbrowser
 from flask import Flask, send_from_directory, abort
-from flask_session import Session
 from flask_cors import CORS
 from config import Config
 from util.user import User
@@ -29,7 +28,7 @@ from util.lobby import Lobby
 app = Flask(__name__)
 app.config.from_object(Config)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50 megabytes
-Session(app)
+# Default secure cookie sessions (Flask built-in). Removed Flask-Session/Redis.
 
 # CORS only in development when the UI runs on a different origin (e.g., localhost:3000)
 if os.environ.get("FLASK_ENV") == "development":
