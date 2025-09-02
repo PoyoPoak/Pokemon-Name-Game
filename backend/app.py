@@ -39,11 +39,9 @@ if os.environ.get("FLASK_ENV") == "development":
 # ---------------------------------------------------------------------------
 # Blueprints (register additional ones here)
 # ---------------------------------------------------------------------------
-from routes.example_routes import bp as example_bp
 from routes.health_routes import bp as health_bp
 from routes.game_routes import bp as game_bp
 
-app.register_blueprint(example_bp, url_prefix="/api")
 app.register_blueprint(health_bp, url_prefix="/api")
 app.register_blueprint(game_bp, url_prefix="/api")
 
