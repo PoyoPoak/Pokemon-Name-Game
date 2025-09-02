@@ -54,6 +54,7 @@ class Game:
 			token (covers edge cases of alternate forms / spacing, though Gen 1 is simple).
 	"""
 
+	# TODO Change where this gets its time
 	def __init__(self, lobby_id: str, duration_seconds: int = 15 * 60):
 		# Identifiers / metadata
 		self.lobby_id = lobby_id
@@ -275,14 +276,14 @@ class Game:
 GAMES: Dict[str, Game] = {}
 
 
-def get_or_create_game(lobby_id: str, duration_seconds: int = 15 * 60) -> Game:
+def get_or_create_game(lobby_id: str) -> Game:
 	"""Fetch existing game for lobby or create a new one with given duration.
 
 	Duration parameter only applies if creating a new instance.
 	"""
 	game = GAMES.get(lobby_id)
 	if game is None:
-		game = Game(lobby_id, duration_seconds)
+		game = Game(lobby_id)
 		GAMES[lobby_id] = game
 	return game
 
