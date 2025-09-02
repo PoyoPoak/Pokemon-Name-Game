@@ -1,10 +1,8 @@
-"""Game routes: create/join game, get state, submit guesses.
+"""Application game routes.
 
-MVP: in-memory only. Not production safe (no auth, no persistence).
+# TODO Add documentation for what this file does and it's routes/capabilities
+
 """
-
-from __future__ import annotations
-
 import uuid
 from flask import Blueprint, request, jsonify
 from util.route_builder import RouteBuilder
@@ -13,64 +11,98 @@ from util.game import get_or_create_game, GAMES
 
 bp = Blueprint('game', __name__)
 
-LOBBIES: dict[str, Lobby] = {}
+# In memory lobby storage as {lobby_code: Lobby object}
+ACTIVE_LOBBIES: dict[str, Lobby] = {}
+
+
+# ---------------------------------------------------------------------------
+# Route Handlers
+# ---------------------------------------------------------------------------
 
 
 def _get_lobby(lobby_id: str) -> Lobby | None:
-    return LOBBIES.get(lobby_id)
+    """Get a lobby by its ID.
+
+    Args:
+        lobby_id (str): The ID of the lobby.
+
+    Returns:
+        Lobby: The lobby object if found, otherwise None.
+    """
+    return ACTIVE_LOBBIES.get(lobby_id)
 
 
 def create_game():
+    """Create a new game lobby.
+
+    Returns:
+        Response: The response object containing the lobby ID and player information.
+    """
     data = request.json or {}
     username = (data.get('username') or '').strip()
-    duration = int(data.get('durationSeconds') or 900)
-    if not username:
-        return jsonify({'error': 'username_required'}), 400
     lobby_id = uuid.uuid4().hex[:8]
     lobby = Lobby(lobby_id)
     lobby.add_player(username)
-    LOBBIES[lobby_id] = lobby
-    game = get_or_create_game(lobby_id, duration)
+    ACTIVE_LOBBIES[lobby_id] = lobby
+    game = get_or_create_game(lobby_id)
     return jsonify({'lobbyId': lobby_id, 'player': username, 'state': game.summary()}), 201
 
 
 def join_game(lobby_id: str):
+    """Join an existing game lobby.
+
+    Args:
+        lobby_id (str): The ID of the lobby to join.
+
+    Returns:
+        Response: The response object containing the lobby ID and player information.
+    """
     data = request.json or {}
     username = (data.get('username') or '').strip()
-    if not username:
-        return jsonify({'error': 'username_required'}), 400
     lobby = _get_lobby(lobby_id)
     if not lobby:
         return jsonify({'error': 'lobby_not_found'}), 404
     lobby.add_player(username)
-    game = get_or_create_game(lobby_id)
+    game = get_or_create_game(lobby_id) 
     return jsonify({'lobbyId': lobby_id, 'player': username, 'state': game.summary()}), 200
 
 
 def game_state(lobby_id: str):
+    """Get the current state of the game lobby.
+
+    Args:
+        lobby_id (str): The ID of the lobby.
+
+    Returns:
+        Response: The response object containing the lobby and game state information.
+    """
     game = GAMES.get(lobby_id)
     if not game:
         return jsonify({'error': 'not_found'}), 404
-    lobby = LOBBIES.get(lobby_id)
-    return jsonify({"lobby": lobby.to_dict() if lobby else None, "game": game.detailed_state()})
+    lobby = ACTIVE_LOBBIES.get(lobby_id)
+    return jsonify({"lobby": lobby.to_dict() if lobby else None, "game": game.detailed_state()}), 200
 
 
 def submit_guess(lobby_id: str):
+    """Submit a guess for the current game.
+
+    Args:
+        lobby_id (str): The ID of the lobby.
+
+    Returns:
+        Response: The response object containing the result of the guess submission.
+    """
     data = request.json or {}
     guess = data.get('guess') or ''
     player = data.get('player') or ''
-    if not guess:
-        return jsonify({'error': 'guess_required'}), 400
     game = GAMES.get(lobby_id)
     if not game:
         return jsonify({'error': 'game_not_found'}), 404
     result = game.submit_guess(player, guess)
-    # If accepted, increment that player's score in lobby
     if result.get('accepted'):
         lobby = _get_lobby(lobby_id)
         if lobby and player:
             lobby.add_score(player, 1)
-            # include updated lobby players for immediate UI refresh
             result['players'] = lobby.to_dict().get('players', [])
             try:
                 print(f"[DEBUG] Score update: lobby={lobby_id} player={player} score={lobby.get_player(player).score}")
@@ -80,6 +112,14 @@ def submit_guess(lobby_id: str):
 
 
 def lobby_players(lobby_id: str):
+    """Get the list of players in the lobby.
+
+    Args:
+        lobby_id (str): The ID of the lobby.
+
+    Returns:
+        Response: The response object containing the list of players in the lobby.
+    """
     lobby = _get_lobby(lobby_id)
     if not lobby:
         return jsonify({'error': 'lobby_not_found'}), 404
@@ -87,6 +127,14 @@ def lobby_players(lobby_id: str):
 
 
 def reset_game(lobby_id: str):
+    """Reset the game in the specified lobby.
+
+    Args:
+        lobby_id (str): The ID of the lobby.
+
+    Returns:
+        Response: The response object containing the status of the reset operation.
+    """
     game = GAMES.get(lobby_id)
     if not game:
         return jsonify({'error': 'game_not_found'}), 404
@@ -95,10 +143,18 @@ def reset_game(lobby_id: str):
 
 
 def start_game(lobby_id: str):
+    """Start the game in the specified lobby.
+
+    Args:
+        lobby_id (str): The ID of the lobby.
+
+    Returns:
+        Response: The response object containing the status of the start operation.
+    """
     game = GAMES.get(lobby_id)
     if not game:
         # Auto-create if lobby exists
-        if lobby_id in LOBBIES:
+        if lobby_id in ACTIVE_LOBBIES:
             game = get_or_create_game(lobby_id)
         else:
             return jsonify({'error': 'lobby_not_found'}), 404
@@ -106,11 +162,24 @@ def start_game(lobby_id: str):
     return jsonify({'status': status, 'state': game.summary()})
 
 def pause_game(lobby_id: str):
+    """Pause the game in the specified lobby.
+
+    Args:
+        lobby_id (str): The ID of the lobby.
+
+    Returns:
+        Response: The response object containing the status of the pause operation.
+    """
     game = GAMES.get(lobby_id)
     if not game:
         return jsonify({'error': 'game_not_found'}), 404
     status = game.pause()
     return jsonify({'status': status, 'state': game.summary()})
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
 
 
 RouteBuilder(bp) \
