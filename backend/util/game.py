@@ -12,13 +12,9 @@ Future enhancements (out of scope here):
 	* Pub/Sub or WS/SSE pushing instead of client polling.
 	* Per‑player scoring & attribution (only raw guess acceptance handled now).
 """
-
-from __future__ import annotations
-
 import time
 import re
 from typing import Dict, List, Set
-
 from data.pokemon_data import GENERATION_1
 
 
@@ -29,7 +25,14 @@ def _clean_name(name: str) -> str:
 		* Remove any non‑alphabetic characters.
 		* Lowercase.
 		* Strip surrounding whitespace.
+  
 	This allows accepting variations like "Mr. Mime" vs "mrmime".
+
+	Args:
+		name (str): The name to normalize.
+
+	Returns:
+		str: The normalized name.
 	"""
 	return re.sub(r"[^a-zA-Z]", "", name).lower().strip()
 
@@ -39,7 +42,7 @@ class Game:
 
 	Timing model:
 		* When created, the game is "not started"; `time_left` reports full duration.
-		* `start()` sets `started = True` and establishes `ends_at`.
+		* `start()` sets `started = Tru	e` and establishes `ends_at`.
 		* `pause()` captures remaining seconds in `paused_remaining` and nulls `ends_at`.
 		* Resuming (calling `start()` while paused) recalculates a new `ends_at` based on
 			the stored remaining seconds.
@@ -53,7 +56,6 @@ class Game:
 		* `clean_to_positions` precomputes which Pokédex positions share the same cleaned
 			token (covers edge cases of alternate forms / spacing, though Gen 1 is simple).
 	"""
-
 	# TODO Change where this gets its time
 	def __init__(self, lobby_id: str, duration_seconds: int = 15 * 60):
 		# Identifiers / metadata
@@ -62,13 +64,13 @@ class Game:
 		self.created_at = time.time()
 
 		# Timing state
-		self.started = False          # Has the game ever been started? (affects restart logic)
-		self.paused = False           # Currently paused flag
-		self.started_at: float | None = None  # Wall time when (last) started/resumed
-		self.ends_at: float | None = None     # Wall time when current run should end
-		self.paused_remaining: int | None = None  # Seconds remaining captured at pause
+		self.started = False
+		self.paused = False
+		self.started_at: float | None = None
+		self.ends_at: float | None = None
+		self.paused_remaining: int | None = None
 
-		# Pokémon data (Gen 1 full list). For a future multi‑gen mode, original_list could vary.
+		# Pokémon data
 		self.original_list: List[str] = GENERATION_1
 
 		# Dynamic collections partition original_list into remaining vs guessed positions.
@@ -96,6 +98,9 @@ class Game:
 		  1. If paused, return the frozen `paused_remaining` snapshot.
 		  2. If never started (or ends_at cleared), report full duration.
 		  3. Otherwise, compute `ends_at - now` clamped at >= 0.
+
+		Returns:
+			int: Remaining time in seconds.
 		"""
 		if self.paused and self.paused_remaining is not None:
 			return self.paused_remaining
@@ -104,7 +109,11 @@ class Game:
 		return max(0, int(self.ends_at - time.time()))
 
 	def is_active(self) -> bool:
-		"""Whether the game is currently running (started, not paused, time > 0)."""
+		"""Check if the game is currently active (started, not paused, time > 0).
+
+		Returns:
+			bool: True if the game is active, False otherwise.
+		"""
 		return self.started and (not self.paused) and self.time_left() > 0
 
 	def start(self) -> str:
@@ -115,9 +124,15 @@ class Game:
 		  * 'already_started'– already running (no state change).
 		  * 'resumed'        – unpaused with remaining time restored.
 		  * 'restarted'      – had ended (time or completion) and was fully reset.
+
+		Returns:
+			str: Description of the start action taken.
 		"""
 		if self.started and self.paused:
-			remaining = self.paused_remaining if self.paused_remaining is not None else self.duration_seconds
+			if self.paused_remaining is not None:
+				remaining = self.paused_remaining
+			else:
+				remaining = self.duration_seconds
 			self.started_at = time.time()
 			self.ends_at = self.started_at + remaining
 			self.paused = False
@@ -143,6 +158,9 @@ class Game:
 		  * 'already_paused'  – idempotent.
 		  * 'already_finished'– game already ended (time or completion).
 		  * 'paused'          – success.
+
+		Returns:
+			str: Description of the pause action taken.
 		"""
 		if not self.started:
 			return 'not_started'
@@ -163,7 +181,12 @@ class Game:
 	def submit_guess(self, player: str, raw_guess: str) -> Dict[str, object]:
 		"""Handle a user guess with validation & logging.
 
-		Returns result dict (accepted flag, metadata) plus logs the attempt.
+		Args:
+			player (str): The player making the guess.
+			raw_guess (str): The raw guess input from the player.
+
+		Returns:
+			Dict[str, object]: The result of the guess submission.
 		"""
 		if not self.started:
 			return self._log_event(player, raw_guess, {"accepted": False, "reason": "not_started"})
@@ -229,47 +252,49 @@ class Game:
 			"guessed": self.guessed,  # {position: name}
 			"log": list(self.log),
 		}
-	# ------------------------------------------------------------------
-	# Reset / admin
-	# ------------------------------------------------------------------
-	def reset(self) -> None:
-		"""Hard reset: reconstruct object while retaining lobby id & duration."""
-		self.__init__(self.lobby_id, self.duration_seconds)
+  
+	# TODO Readd later
+	# # ------------------------------------------------------------------
+	# # Reset / admin
+	# # ------------------------------------------------------------------
+	# def reset(self) -> None:
+	# 	"""Hard reset: reconstruct object while retaining lobby id & duration."""
+	# 	self.__init__(self.lobby_id, self.duration_seconds)
 
-	def _reset_state(self) -> None:
-		"""Internal partial reset (used for full game restart without reallocation)."""
-		self.remaining = {i + 1: n for i, n in enumerate(self.original_list)}
-		self.guessed = {}
-		self.guessed_clean = set()
-		self.clean_to_positions = {}
-		for pos, name in self.remaining.items():
-			cleaned = _clean_name(name)
-			self.clean_to_positions.setdefault(cleaned, []).append(pos)
-		self.log.clear()
+	# def _reset_state(self) -> None:
+	# 	"""Internal partial reset (used for full game restart without reallocation)."""
+	# 	self.remaining = {i + 1: n for i, n in enumerate(self.original_list)}
+	# 	self.guessed = {}
+	# 	self.guessed_clean = set()
+	# 	self.clean_to_positions = {}
+	# 	for pos, name in self.remaining.items():
+	# 		cleaned = _clean_name(name)
+	# 		self.clean_to_positions.setdefault(cleaned, []).append(pos)
+	# 	self.log.clear()
 
-	def _log_event(self, player: str, raw_guess: str, result: Dict[str, object]) -> Dict[str, object]:
-		"""Internal helper: append an event to shared log and return enriched result.
+	# def _log_event(self, player: str, raw_guess: str, result: Dict[str, object]) -> Dict[str, object]:
+	# 	"""Internal helper: append an event to shared log and return enriched result.
 
-		Event shape: {id, ts, player, guess, accepted, reason?, positions?}
-		"""
-		import uuid  # local import to avoid module-level cost if unused
-		entry = {
-			"id": uuid.uuid4().hex,
-			"ts": time.time(),
-			"player": player or "",
-			"guess": raw_guess,
-			"accepted": bool(result.get("accepted")),
-			"reason": result.get("reason"),
-			"positions": result.get("positions", []),
-		}
-		self.log.append(entry)
-		if len(self.log) > self.max_log_entries:
-			# Keep most recent entries
-			self.log = self.log[-self.max_log_entries:]
-		# Return result including the event for immediate client consumption
-		result_with_event = dict(result)
-		result_with_event["event"] = entry
-		return result_with_event
+	# 	Event shape: {id, ts, player, guess, accepted, reason?, positions?}
+	# 	"""
+	# 	import uuid  # local import to avoid module-level cost if unused
+	# 	entry = {
+	# 		"id": uuid.uuid4().hex,
+	# 		"ts": time.time(),
+	# 		"player": player or "",
+	# 		"guess": raw_guess,
+	# 		"accepted": bool(result.get("accepted")),
+	# 		"reason": result.get("reason"),
+	# 		"positions": result.get("positions", []),
+	# 	}
+	# 	self.log.append(entry)
+	# 	if len(self.log) > self.max_log_entries:
+	# 		# Keep most recent entries
+	# 		self.log = self.log[-self.max_log_entries:]
+	# 	# Return result including the event for immediate client consumption
+	# 	result_with_event = dict(result)
+	# 	result_with_event["event"] = entry
+	# 	return result_with_event
 
 
 # Global in‑memory registry of games (lobby_id -> Game)
@@ -277,9 +302,13 @@ GAMES: Dict[str, Game] = {}
 
 
 def get_or_create_game(lobby_id: str) -> Game:
-	"""Fetch existing game for lobby or create a new one with given duration.
+	"""Fetch existing game for lobby or create a new one.
 
-	Duration parameter only applies if creating a new instance.
+	Args:
+		lobby_id (str): Unique identifier for the game lobby.
+
+	Returns:
+		Game: The game instance associated with the lobby.
 	"""
 	game = GAMES.get(lobby_id)
 	if game is None:

@@ -1,30 +1,14 @@
-from functools import wraps
-from flask import session, jsonify
+"""Fluent-style helper for defining Flask routes on a Blueprint.
+
+Auth wrapper code is currently commented out; related imports removed to avoid
+lint warnings. Reintroduce them when enabling auth.
+"""
+# from functools import wraps  # (re-enable when auth decorator is restored)
+# from flask import session, jsonify  # (used only by commented auth code)
 
 
 class RouteBuilder:
-    """
-    Fluent-style helper for defining Flask routes on a Blueprint.
-
-    Example
-    -------
-    ```python
-    from flask import Blueprint, jsonify
-    from util.route_builder import RouteBuilder
-
-    Bp = Blueprint("health", __name__)
-
-    Def ping():
-        return jsonify({"status": "ok"})
-
-    RouteBuilder(bp) \
-        .route("/health") \
-        .methods("GET") \
-        .handler(ping) \
-        .build()
-    ```
-    """
-
+    """Route builder with a chainable API."""
     def __init__(self, blueprint):
         """
         Initialize the builder with a Flask Blueprint.
