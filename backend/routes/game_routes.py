@@ -1,7 +1,55 @@
-"""Application game routes.
+"""Game / Lobby HTTP API routes.
 
-# TODO Add documentation for what this file does and it's routes/capabilities
+Overview
+========
+Provides all JSON endpoints for creating / joining lobbies, managing in‑memory
+game instances, submitting guesses, and basic game lifecycle (start / pause /
+reset) plus lightweight player listing. State is **process local & ephemeral**;
+it will be lost on restart and is NOT safe for horizontal scaling.
 
+Data Model (in-memory)
+----------------------
+* ACTIVE_LOBBIES: dict[lobby_id, Lobby]
+* GAMES:          dict[lobby_id, Game] (imported from util.game)
+
+Endpoints
+---------
+POST   /api/games                      -> create_game
+POST   /api/games/<lobby_id>/join      -> join_game
+GET    /api/games/<lobby_id>/state     -> game_state (summary + detailed game + lobby)
+POST   /api/games/<lobby_id>/guess     -> submit_guess (adds score on success)
+GET    /api/games/<lobby_id>/players   -> lobby_players
+POST   /api/games/<lobby_id>/reset     -> reset_game
+POST   /api/games/<lobby_id>/start     -> start_game (auto-creates game if lobby exists)
+POST   /api/games/<lobby_id>/pause     -> pause_game
+
+Response Shapes (core)
+----------------------
+create / join:
+    { "lobbyId": str, "player": str, "state": GameSummary }
+
+game_state:
+    { "lobby": LobbySnapshot | null, "game": GameDetailed }
+
+guess (success):
+    { accepted: true, positions: [int], totalGuessed: int, remaining: int, complete: bool, event: {...}, players?: [...] }
+
+guess (failure):
+    { accepted: false, reason: str, event: {...} }
+
+Design Notes
+------------
+* No authentication yet; usernames are not unique globally, only per lobby.
+* Minimal validation: frontend expected to enforce non-empty username/guess.
+* Timers and scoring logic live in util.game / util.lobby.
+* Consider persisting & broadcasting via websockets for production scale.
+
+Future Improvements (not implemented here)
+------------------------------------------
+* Auth & authorization (validate player identity)
+* Persistence / Redis or database backed lobbies & games
+* Rate limiting on mutating endpoints
+* WebSocket or SSE push for real-time updates
 """
 import uuid
 from flask import Blueprint, request, jsonify
@@ -33,10 +81,11 @@ def _get_lobby(lobby_id: str) -> Lobby | None:
 
 
 def create_game():
-    """Create a new game lobby.
+    """Create a new lobby & associated Game instance.
 
-    Returns:
-        Response: The response object containing the lobby ID and player information.
+    Expects JSON: { "username": str }
+    Returns 201 JSON: { lobbyId, player, state }
+    Frontend ensures non-empty username; backend does not reject blank.
     """
     data = request.json or {}
     username = (data.get('username') or '').strip()
@@ -49,13 +98,11 @@ def create_game():
 
 
 def join_game(lobby_id: str):
-    """Join an existing game lobby.
+    """Join an existing lobby.
 
-    Args:
-        lobby_id (str): The ID of the lobby to join.
-
-    Returns:
-        Response: The response object containing the lobby ID and player information.
+    JSON: { "username": str }
+    404 if lobby not found.
+    200 JSON: { lobbyId, player, state }
     """
     data = request.json or {}
     username = (data.get('username') or '').strip()
@@ -68,13 +115,9 @@ def join_game(lobby_id: str):
 
 
 def game_state(lobby_id: str):
-    """Get the current state of the game lobby.
+    """Return combined lobby + game detailed state.
 
-    Args:
-        lobby_id (str): The ID of the lobby.
-
-    Returns:
-        Response: The response object containing the lobby and game state information.
+    404 if game absent. Lobby may be null if removed after game creation.
     """
     game = GAMES.get(lobby_id)
     if not game:
@@ -84,13 +127,11 @@ def game_state(lobby_id: str):
 
 
 def submit_guess(lobby_id: str):
-    """Submit a guess for the current game.
+    """Submit a guess for the given lobby's active game.
 
-    Args:
-        lobby_id (str): The ID of the lobby.
-
-    Returns:
-        Response: The response object containing the result of the guess submission.
+    JSON: { guess: str, player: str }
+    404 if game missing.
+    On success increments player's lobby score & returns enriched result.
     """
     data = request.json or {}
     guess = data.get('guess') or ''
@@ -112,14 +153,7 @@ def submit_guess(lobby_id: str):
 
 
 def lobby_players(lobby_id: str):
-    """Get the list of players in the lobby.
-
-    Args:
-        lobby_id (str): The ID of the lobby.
-
-    Returns:
-        Response: The response object containing the list of players in the lobby.
-    """
+    """Return current lobby player list and aggregate score info."""
     lobby = _get_lobby(lobby_id)
     if not lobby:
         return jsonify({'error': 'lobby_not_found'}), 404
@@ -127,13 +161,9 @@ def lobby_players(lobby_id: str):
 
 
 def reset_game(lobby_id: str):
-    """Reset the game in the specified lobby.
+    """Hard reset game state (timer & guesses) for lobby.
 
-    Args:
-        lobby_id (str): The ID of the lobby.
-
-    Returns:
-        Response: The response object containing the status of the reset operation.
+    404 if game not found.
     """
     game = GAMES.get(lobby_id)
     if not game:
@@ -143,13 +173,9 @@ def reset_game(lobby_id: str):
 
 
 def start_game(lobby_id: str):
-    """Start the game in the specified lobby.
+    """Start or restart (if finished) the game.
 
-    Args:
-        lobby_id (str): The ID of the lobby.
-
-    Returns:
-        Response: The response object containing the status of the start operation.
+    Auto-creates a game if lobby exists but no game yet.
     """
     game = GAMES.get(lobby_id)
     if not game:
@@ -162,14 +188,7 @@ def start_game(lobby_id: str):
     return jsonify({'status': status, 'state': game.summary()})
 
 def pause_game(lobby_id: str):
-    """Pause the game in the specified lobby.
-
-    Args:
-        lobby_id (str): The ID of the lobby.
-
-    Returns:
-        Response: The response object containing the status of the pause operation.
-    """
+    """Pause running game (idempotent). 404 if game missing."""
     game = GAMES.get(lobby_id)
     if not game:
         return jsonify({'error': 'game_not_found'}), 404
