@@ -20,8 +20,13 @@ In-memory state (lobbies, games) resets on redeploy or container restart. For pe
 ### Scaling
 Single process (3 Gunicorn workers). Horizontal scaling would require shared state (Redis) + possibly WebSockets/SSE for realtime.
 
-# Flask-App
-My personal template for creating for flask web application monorepos. Includes backend and frontend frameworks.
+
+
+
+
+
+# Pokemon Naming Game
+A web app multiplayer (or solo) name‑guessing game themed around the Pokémon franchise where players try to correctly identify Pokémon species names from memory under time. For each correct identification, players will score points. Future enhancements may include difficulty tiers, generation filters, competitive lobbies, and accessibility options (e.g., simplified spelling assistance or regional form handling).
 
 **OPERATING SYSTEMS:** Much of these instructions were done in windows. That said, please let me know if there's any discrepancies setting up for another operating system.
 
@@ -96,15 +101,13 @@ npm run dev
 
 View the webpage at [http://localhost:3000](http://localhost:3000)
 
-Node, this project uses next/font to automatically optimize and load Geist, a new font family for Vercel.
-
 
 
 <br/>
 
 
 
-## Project Compilation
+## Project Compilation (DEPRECIATED OR NOT SETUP)
 Compile the entire project (frontend build + backend executable) using the existing PyInstaller spec.
 
 **Build Frontend**
@@ -138,7 +141,7 @@ The app will start Flask on `http://localhost:8080` and open your browser.
 
 
 
-## Regenerating / updating the spec (only if you need to)
+## Regenerating / Updating the Spec (DEPRECIATED OR NOT SETUP)
 If you add entry points or want a fresh spec:
 ```bash
 pyi-makespec app.py --name PROJECT_NAME --add-data "../frontend/dist;frontend/dist"
@@ -151,7 +154,7 @@ Then edit the generated `.spec` similarly to the committed one (adding OR-Tools 
 
 
 
-## Cleaning the  Build Slate
+## Cleaning the Build Slate (DEPRECIATED OR NOT SETUP)
 Remove build artifacts if you encounter issues:
 ```bash
 rm -rf frontend/dist
@@ -162,18 +165,48 @@ rm -rf backend/build backend/dist backend/__pycache__
 
 
 <br/>
-<br/>
 
 
 
 # Project Tech Stack
 
-**Frontend Stack**
-- NextJS
-- Tailwind CSS
-- ...more...
+**Frontend**
+- React 18 (SPA)
+- TypeScript
+- Vite build tool
+- Tailwind CSS (utility styling)
+- shadcn/ui style component primitives (customized in `client/components/ui`)
+- Fetch API (no external query client yet)
+- ESLint / (add later) Prettier (not fully configured in repo)
 
-**Backend Stack**
-- Python 3.12.8
-- Flask
-- ...more...
+**Backend**
+- Python 3.12.x
+- Flask (core web framework)
+- flask-cors (dev CORS for separate frontend origin)
+- Flask-Session (optional; only active if `SESSION_TYPE=redis`)
+- Redis (optional session store; in-memory cookie sessions by default)
+- Authlib (present, reserved for future OAuth flows)
+- python-dotenv (env loading in local dev)
+
+**Infrastructure / Tooling**
+- Docker (multi-stage image builds frontend + backend)
+- Railway (deployment & optional managed Redis)
+- Gunicorn (WSGI server in container – via Dockerfile CMD or entrypoint)
+
+**Data / State**
+- In-memory game & lobby registries (process-local, non-persistent)
+- Pokémon Generation 1 species list (`backend/data/pokemon_data.py`)
+
+**Testing (Planned / Not Yet Implemented)**
+- Pytest for backend unit tests (not added yet)
+- Vitest / React Testing Library for frontend (not added yet)
+
+**Optional / Future**
+- WebSockets or SSE for real-time updates (currently polling)
+- Redis pub/sub or DB persistence for horizontal scaling
+- Authentication & authorization layer (OAuth via Authlib)
+
+**Removed / Deferred**
+- Heavy numeric / optimization libs (numpy, pandas, ortools) were pruned for lean runtime
+
+> Note: Some listed packages (Authlib, Redis) are optional and inactive unless corresponding environment variables are set.
