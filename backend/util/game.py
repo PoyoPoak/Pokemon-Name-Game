@@ -272,29 +272,37 @@ class Game:
 	# 		self.clean_to_positions.setdefault(cleaned, []).append(pos)
 	# 	self.log.clear()
 
-	# def _log_event(self, player: str, raw_guess: str, result: Dict[str, object]) -> Dict[str, object]:
-	# 	"""Internal helper: append an event to shared log and return enriched result.
+	def _log_event(self, player: str, raw_guess: str, result: Dict[str, object]) -> Dict[str, object]:
+		"""Internal helper: append an event to shared log and return enriched result.
 
-	# 	Event shape: {id, ts, player, guess, accepted, reason?, positions?}
-	# 	"""
-	# 	import uuid  # local import to avoid module-level cost if unused
-	# 	entry = {
-	# 		"id": uuid.uuid4().hex,
-	# 		"ts": time.time(),
-	# 		"player": player or "",
-	# 		"guess": raw_guess,
-	# 		"accepted": bool(result.get("accepted")),
-	# 		"reason": result.get("reason"),
-	# 		"positions": result.get("positions", []),
-	# 	}
-	# 	self.log.append(entry)
-	# 	if len(self.log) > self.max_log_entries:
-	# 		# Keep most recent entries
-	# 		self.log = self.log[-self.max_log_entries:]
-	# 	# Return result including the event for immediate client consumption
-	# 	result_with_event = dict(result)
-	# 	result_with_event["event"] = entry
-	# 	return result_with_event
+		Event shape: {id, ts, player, guess, accepted, reason?, positions?}
+
+		Args:
+			player (str): The name of the player making the guess.
+			raw_guess (str): The raw guess input from the player.
+			result (Dict[str, object]): The result of the guess evaluation.
+
+		Returns:
+			Dict[str, object]: The enriched result including the event log entry.
+		"""
+		import uuid  # local import to avoid module-level cost if unused
+		entry = {
+			"id": uuid.uuid4().hex,
+			"ts": time.time(),
+			"player": player or "",
+			"guess": raw_guess,
+			"accepted": bool(result.get("accepted")),
+			"reason": result.get("reason"),
+			"positions": result.get("positions", []),
+		}
+		self.log.append(entry)
+		if len(self.log) > self.max_log_entries:
+			# Keep most recent entries
+			self.log = self.log[-self.max_log_entries:]
+		# Return result including the event for immediate client consumption
+		result_with_event = dict(result)
+		result_with_event["event"] = entry
+		return result_with_event
 
 
 # Global in‑memory registry of games (lobby_id -> Game)
