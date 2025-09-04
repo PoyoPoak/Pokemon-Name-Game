@@ -43,7 +43,11 @@ export function HomePage({ className }: { className?: string }) {
       }
       const data = await resp.json();
       if (!resp.ok) {
-        setError(data.error || 'Request failed');
+        // Prefer server-provided human friendly message when available.
+        const serverMessage: string | undefined = data.message;
+        const code: string | undefined = data.error;
+        const friendly = serverMessage || (code ? friendlyError(code) : undefined) || 'Request failed';
+        setError(friendly);
       } else {
         setPreview(data); // debug
         const lobbyId = data.lobbyId || code;
@@ -54,6 +58,18 @@ export function HomePage({ className }: { className?: string }) {
       setError(err.message || 'Network error');
     } finally {
       setPending(false);
+    }
+  }
+
+  function friendlyError(code?: string): string | undefined {
+    if (!code) return undefined;
+    switch (code) {
+      case 'username_taken':
+        return 'That username is already taken in this lobby.';
+      case 'lobby_not_found':
+        return 'Lobby code not found.';
+      default:
+        return undefined;
     }
   }
 

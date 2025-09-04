@@ -91,7 +91,11 @@ def create_game():
     username = (data.get('username') or '').strip()
     lobby_id = uuid.uuid4().hex[:8]
     lobby = Lobby(lobby_id)
-    lobby.add_player(username)
+    try:
+        lobby.add_player(username)
+    except ValueError:
+        # Duplicate username in a brand new lobby is rare (same user double‑submit)
+        return jsonify({'error': 'username_taken', 'message': 'That username is already taken in this lobby. Please choose another.'}), 400
     ACTIVE_LOBBIES[lobby_id] = lobby
     game = get_or_create_game(lobby_id)
     return jsonify({'lobbyId': lobby_id, 'player': username, 'state': game.summary()}), 201
@@ -108,8 +112,11 @@ def join_game(lobby_id: str):
     username = (data.get('username') or '').strip()
     lobby = _get_lobby(lobby_id)
     if not lobby:
-        return jsonify({'error': 'lobby_not_found'}), 404
-    lobby.add_player(username)
+        return jsonify({'error': 'lobby_not_found', 'message': 'Lobby code not found. Double‑check and try again.'}), 404
+    try:
+        lobby.add_player(username)
+    except ValueError:
+        return jsonify({'error': 'username_taken', 'message': 'That username is already taken in this lobby. Please pick a different one.'}), 400
     game = get_or_create_game(lobby_id) 
     return jsonify({'lobbyId': lobby_id, 'player': username, 'state': game.summary()}), 200
 
