@@ -234,24 +234,33 @@ class Game:
 	# ------------------------------------------------------------------
 	def summary(self) -> Dict[str, object]:
 		"""Compact state used by most polling endpoints."""
-		return {
+		remaining_time = self.time_left()
+		data = {
 			"lobbyId": self.lobby_id,
 			"duration": self.duration_seconds,
-			"timeLeft": self.time_left(),
+			"timeLeft": remaining_time,
 			"total": len(self.original_list),
 			"guessedCount": len(self.guessed),
 			"isActive": self.is_active(),
 			"started": self.started,
 			"paused": self.paused,
 		}
+		# If timer expired or all guessed, include full canonical list for client reveal
+		if remaining_time == 0 or len(self.guessed) >= len(self.original_list):
+			data["all"] = [
+				{"index": i + 1, "name": name}
+				for i, name in enumerate(self.original_list)
+			]
+		return data
 
 	def detailed_state(self) -> Dict[str, object]:
 		"""Expanded state including full guessed mapping and shared log."""
-		return {
-			**self.summary(),
-			"guessed": self.guessed,  # {position: name}
+		base = self.summary()
+		base.update({
+			"guessed": self.guessed,
 			"log": list(self.log),
-		}
+		})
+		return base
   
 	# TODO Readd later
 	# # ------------------------------------------------------------------

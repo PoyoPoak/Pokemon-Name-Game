@@ -60,6 +60,7 @@ export function GamePage() {
   const [copied, setCopied] = useState(false);
 
   const [pokemonSet, setPokemonSet] = useState(DEFAULT_SET);
+  const [revealed, setRevealed] = useState(false);
   const [guessedMap, setGuessedMap] = useState<Record<number, string>>({});
   const [input, setInput] = useState("");
   const [running, setRunning] = useState(false); // reflects server started & not paused & active
@@ -74,6 +75,7 @@ export function GamePage() {
   const [log, setLog] = useState<GuessLogEntry[]>([]); // existing log; not focus per request
   const [guessError, setGuessError] = useState<string | null>(null);
   const submittingRef = useRef(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const [players, setPlayers] = useState<{ name: string; score: number }[]>([]);
   const [playersError, setPlayersError] = useState<string | null>(null);
   // Maintain stable width for lobby code button based solely on code length (plus small padding)
@@ -145,6 +147,11 @@ export function GamePage() {
         // integrate guessed map if provided
         if (game?.guessed && typeof game.guessed === 'object') {
           setGuessedMap(game.guessed);
+        }
+        // If server reveals full list after completion, adopt it once
+        if (!revealed && Array.isArray(game?.all)) {
+          setPokemonSet(game.all);
+          setRevealed(true);
         }
         // update players from lobby (authoritative) if present
         if (lobby && Array.isArray(lobby.players)) {
@@ -326,6 +333,9 @@ export function GamePage() {
     } finally {
       submittingRef.current = false;
       setInput('');
+      if (inputRef.current) {
+        setTimeout(() => inputRef.current?.focus(), 0);
+      }
     }
   }, [input, lobbyId, playerName, running, paused, timeLeft]);
 
@@ -348,6 +358,7 @@ export function GamePage() {
                   {guessError && <span role="alert" className="text-[10px] text-destructive whitespace-nowrap">{guessError}</span>}
                 </div>
                 <Input
+                  ref={inputRef}
                   id="guess"
                   placeholder={running ? "Start typing..." : paused ? "Paused" : "Start the game first"}
                   value={input}
@@ -428,11 +439,13 @@ export function GamePage() {
                       </thead>
                       <tbody>
                         {colArr.map(p => {
-                          const name = guessedMap[p.index];
+                          const guessedName = guessedMap[p.index];
+                          const showName = guessedName || (revealed ? p.name : '');
+                          const missed = revealed && !guessedName && p.name;
                           return (
-                            <tr key={p.index} className={cn("border-b last:border-b-0 h-6", name && "bg-primary/10") }>
+                            <tr key={p.index} className={cn("border-b last:border-b-0 h-6", guessedName && "bg-primary/10") }>
                               <td className="px-2 py-0.5 align-middle tabular-nums w-12 text-muted-foreground">{p.index.toString().padStart(3,'0')}</td>
-                              <td className="px-2 py-0.5 align-middle font-medium">{formatPokemonName(name || '')}</td>
+                              <td className={cn("px-2 py-0.5 align-middle font-medium", missed && "text-red-600 font-bold dark:text-red-400")}>{formatPokemonName(showName || '')}</td>
                             </tr>
                           );
                         })}
