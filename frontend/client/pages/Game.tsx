@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-// Placeholder set; backend will supply eventually
+// TODO: Placeholder set; backend will supply eventually
 const DEFAULT_SET = Array.from({ length: 151 }, (_, i) => ({ index: i + 1, name: "" }));
 
 interface GuessLogEntry {
@@ -15,6 +15,41 @@ interface GuessLogEntry {
   result: "correct" | "duplicate" | "not_found" | "game_over" | "not_started" | "empty";
   at: number; // epoch ms
   positions?: number[];
+}
+
+// Human‑friendly badge labels for log result codes
+const RESULT_LABELS: Record<string, string> = {
+  correct: 'Correct',
+  duplicate: 'Duplicate',
+  not_found: 'Incorrect',
+  game_over: 'Game Over',
+  not_started: 'Not Started',
+  empty: 'No Guess Submitted'
+};
+
+// Basic capitalization for displaying Pokémon names (fallback until canonical list populates)
+function formatPokemonName(name: string): string {
+  if (!name) return '';
+  // Lower then capitalize each word boundary letter
+  return name
+    .toLowerCase()
+    .replace(/\b([a-z])/g, (m) => m.toUpperCase());
+}
+
+// Map backend reasons / generic codes to user‑friendly inline guess error text
+function friendlyGuessMessage(code: string): string {
+  switch (code) {
+    case 'duplicate': return 'Already guessed.';
+    case 'not_found': return 'No matching Pokémon.';
+    case 'empty': return 'Enter a Pokémon name first.';
+    case 'game_over': return 'Game finished – start a new round.';
+    case 'not_started': return 'Start the game first.';
+    case 'paused':
+    case 'not_started_or_paused': return 'Game is paused.';
+    case 'network_error': return 'Network issue – try again.';
+    case 'rejected': return 'Guess rejected.';
+    default: return code.replace(/_/g, ' ');
+  }
 }
 
 export function GamePage() {
@@ -41,6 +76,8 @@ export function GamePage() {
   const submittingRef = useRef(false);
   const [players, setPlayers] = useState<{ name: string; score: number }[]>([]);
   const [playersError, setPlayersError] = useState<string | null>(null);
+  // Maintain stable width for lobby code button based solely on code length (plus small padding)
+  const lobbyButtonWidthCh = useMemo(() => ((lobbyId || '').length + 2), [lobbyId]);
 
   // Poll lobby players
   useEffect(() => {
@@ -69,7 +106,7 @@ export function GamePage() {
     return () => clearInterval(id);
   }, []);
 
-  // Poll game state (every 2s)
+  // Poll game state
   useEffect(() => {
     if (!lobbyId) return;
     let cancelled = false;
@@ -79,8 +116,8 @@ export function GamePage() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (cancelled) return;
-  const game = data.game || data.state || data; // flexible shape
-  const lobby = data.lobby;
+        const game = data.game || data.state || data; // flexible shape
+        const lobby = data.lobby;
         if (game?.duration) setDuration(game.duration);
         const startedFlag = !!game?.started;
         const pausedFlag = !!game?.paused;
@@ -98,7 +135,7 @@ export function GamePage() {
           }
         }
         setPaused(pausedFlag);
-  setStarted(startedFlag);
+        setStarted(startedFlag);
         setRunning(startedFlag && !pausedFlag && (game.timeLeft ?? 0) > 0);
         if (startedFlag && startTs == null && typeof game?.timeLeft === 'number') {
           // derive server startTs = now - (duration - timeLeft)
@@ -141,7 +178,8 @@ export function GamePage() {
       }
     }
     fetchState();
-    const iv = setInterval(fetchState, 2000);
+    // TODO Make this into a env var
+    const iv = setInterval(fetchState, 1000);
     return () => { cancelled = true; clearInterval(iv); };
   }, [lobbyId, startTs]);
 
@@ -171,7 +209,7 @@ export function GamePage() {
     if (!startTs) return duration;
     const elapsed = (now - startTs) / 1000;
     return Math.max(0, Math.ceil(duration - elapsed));
-  }, [now, duration, startTs]);
+  }, [now, duration, startTs, started, paused]);
 
   useEffect(() => {
     if (timeLeft === 0 && running) setRunning(false);
@@ -189,9 +227,9 @@ export function GamePage() {
         lastServerRef.current = { timeLeft: state.timeLeft, fetchedAt: Date.now() };
         setStartTs(Date.now() - (state.duration - state.timeLeft) * 1000);
       }
-  setPaused(false);
-  setStarted(true);
-  setRunning(true);
+      setPaused(false);
+      setStarted(true);
+      setRunning(true);
       setStateError(null);
     } catch (e: any) {
       setStateError(e.message || 'Start failed');
@@ -208,8 +246,8 @@ export function GamePage() {
       if (typeof state?.timeLeft === 'number') {
         lastServerRef.current = { timeLeft: state.timeLeft, fetchedAt: Date.now() };
       }
-  setPaused(true);
-  setRunning(false); // treat paused as not running for input disable
+      setPaused(true);
+      setRunning(false);
       setStateError(null);
     } catch (e: any) {
       setStateError(e.message || 'Pause failed');
@@ -243,7 +281,7 @@ export function GamePage() {
       });
       const data = await res.json();
       if (!res.ok || !data.accepted) {
-        setGuessError(data.reason || 'rejected');
+        setGuessError(friendlyGuessMessage(data.reason || 'rejected'));
         if (data.event) {
           setLog(prev => [{
             id: data.event.id,
@@ -284,7 +322,7 @@ export function GamePage() {
         }, ...prev]);
       }
     } catch (err: any) {
-      setGuessError(err.message || 'network_error');
+      setGuessError(friendlyGuessMessage(err.message || 'network_error'));
     } finally {
       submittingRef.current = false;
       setInput('');
@@ -305,7 +343,10 @@ export function GamePage() {
           <form onSubmit={submitGuess} className="flex flex-col gap-4">
             <div className="flex flex-wrap items-end gap-4">
               <div className="flex-1 min-w-[240px] grid gap-2">
-                <label htmlFor="guess" className="text-sm font-medium">Enter Pokémon species:</label>
+                <div className="flex items-center justify-between gap-2">
+                  <label htmlFor="guess" className="text-sm font-medium">Enter Pokémon species:</label>
+                  {guessError && <span role="alert" className="text-[10px] text-destructive whitespace-nowrap">{guessError}</span>}
+                </div>
                 <Input
                   id="guess"
                   placeholder={running ? "Start typing..." : paused ? "Paused" : "Start the game first"}
@@ -313,16 +354,19 @@ export function GamePage() {
                   onChange={e => setInput(e.target.value)}
                   disabled={!running || timeLeft === 0 || submittingRef.current}
                 />
-                {guessError && <span className="text-[10px] text-destructive">{guessError}</span>}
               </div>
               {lobbyId && (
                 <div className="flex flex-col items-center gap-1 self-end">
                   <span className="text-[10px] uppercase tracking-wide text-muted-foreground text-center">Lobby Code</span>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center">
                     <Button
                       type="button"
-                      variant="outline"
-                      className="h-8 px-3 text-sm font-mono"
+                      variant={copied ? 'default' : 'outline'}
+                      className={cn(
+                        'h-8 px-3 text-sm font-mono transition-colors',
+                        copied && 'bg-green-600 hover:bg-green-600 text-white border-green-600 dark:bg-green-500 dark:hover:bg-green-500'
+                      )}
+                      style={{ width: `${lobbyButtonWidthCh}ch` }}
                       onClick={() => {
                         navigator.clipboard.writeText(lobbyId).then(() => {
                           setCopied(true);
@@ -330,9 +374,8 @@ export function GamePage() {
                         });
                       }}
                     >
-                      {lobbyId}
+                      {copied ? 'Copied!' : lobbyId}
                     </Button>
-                    {copied && <span className="text-xs text-green-600 dark:text-green-400">Copied</span>}
                   </div>
                 </div>
               )}
@@ -343,7 +386,7 @@ export function GamePage() {
                 </div>
                 <div className="flex flex-col items-center">
                   <div className="flex items-center gap-3">
-          {!running ? (
+                    {!running ? (
                       <Button
                         type="button"
                         variant='default'
@@ -351,7 +394,7 @@ export function GamePage() {
                         disabled={!lobbyId}
                         className="h-9 px-3"
                       >
-            {startTs && paused ? 'Resume' : 'Start'}
+                        {startTs && paused ? 'Resume' : 'Start'}
                       </Button>
                     ) : (
                       <Button
@@ -368,7 +411,6 @@ export function GamePage() {
                       <span className="text-3xl font-semibold tabular-nums leading-none">{timeStr}</span>
                     </div>
                   </div>
-                  {/* Give Up button removed per request */}
                   {stateError && <span className="mt-1 text-[10px] text-destructive">{stateError}</span>}
                 </div>
               </div>
@@ -390,7 +432,7 @@ export function GamePage() {
                           return (
                             <tr key={p.index} className={cn("border-b last:border-b-0 h-6", name && "bg-primary/10") }>
                               <td className="px-2 py-0.5 align-middle tabular-nums w-12 text-muted-foreground">{p.index.toString().padStart(3,'0')}</td>
-                              <td className="px-2 py-0.5 align-middle font-medium">{name || ''}</td>
+                              <td className="px-2 py-0.5 align-middle font-medium">{formatPokemonName(name || '')}</td>
                             </tr>
                           );
                         })}
@@ -435,10 +477,16 @@ export function GamePage() {
                 )}
                 {log.map(entry => (
                   <li key={entry.id} className="py-2 flex items-start gap-2">
-                    <span className="text-xs tabular-nums text-muted-foreground w-14">{new Date(entry.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
                     <span className="font-semibold">{entry.player}</span>
                     <span className="flex-1 break-words">{entry.guess}</span>
-                    <span className={cn("text-xs font-medium px-1.5 py-0.5 rounded", entry.result === 'correct' ? 'bg-green-500/20 text-green-700 dark:text-green-300' : entry.result === 'duplicate' ? 'bg-yellow-500/20 text-yellow-700 dark:text-yellow-300' : 'bg-red-500/20 text-red-700 dark:text-red-300')}>{entry.result}</span>
+                    <span className={cn(
+                      "text-xs font-medium px-1.5 py-0.5 rounded",
+                      entry.result === 'correct'
+                        ? 'bg-green-500/20 text-green-700 dark:text-green-300'
+                        : entry.result === 'duplicate'
+                          ? 'bg-yellow-500/20 text-yellow-700 dark:text-yellow-300'
+                          : 'bg-red-500/20 text-red-700 dark:text-red-300'
+                    )}>{RESULT_LABELS[entry.result] || entry.result}</span>
                   </li>
                 ))}
               </ul>
