@@ -36,4 +36,4 @@ EXPOSE 8080
 # Gunicorn (thread workers good for lightweight IO bound app)
 # Use the runtime PORT provided by hosting platforms (e.g. Railway) falling back to 8080.
 # We wrap in sh -c so the env var is expanded at container start.
-CMD ["sh", "-c", "gunicorn -w 3 -k gthread --threads 4 -b 0.0.0.0:${PORT:-8080} app:app"]
+CMD ["sh", "-c", "gunicorn -w 1 -k gthread --threads 1 -b 0.0.0.0:${PORT:-8080} app:app"]
