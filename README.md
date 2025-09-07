@@ -1,6 +1,8 @@
 # Pokemon Naming Game
 A web app multiplayer (or solo) name‑guessing game themed around the Pokémon franchise where players try to correctly identify Pokémon species names from memory under time. For each correct identification, players will score points. Future enhancements may include difficulty tiers, generation filters, competitive lobbies, and accessibility options (e.g., simplified spelling assistance or regional form handling).
 
+**LIVE GAME HERE:** [pokemon-name-game-production.up.railway.app]([url](https://pokemon-name-game-production.up.railway.app/))
+
 **OPERATING SYSTEMS:** Much of these instructions were done in windows. That said, please let me know if there's any discrepancies setting up for another operating system.
 
 **IMPORTANT**:For the setup below, everything was done via a bash terminal.
