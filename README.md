@@ -1,30 +1,3 @@
-## Deployment (Railway)
-
-### Quick Deploy
-1. Ensure repository contains added `Dockerfile` and `backend/wsgi.py` (already included).
-2. Push changes to your default branch.
-3. In Railway: New Project -> Deploy from GitHub -> select this repo.
-4. Railway auto-detects the Dockerfile and builds multi-stage image.
-5. After deploy, open the URL: `/api/health` should return JSON; root serves the React build.
-
-### Local Docker Test
-```
-docker build -t pokemon-game .
-docker run -p 8000:8000 pokemon-game
-```
-Visit http://localhost:8000
-
-### Environment Notes
-In-memory state (lobbies, games) resets on redeploy or container restart. For persistence, add Redis and refactor storage.
-
-### Scaling
-Single process (3 Gunicorn workers). Horizontal scaling would require shared state (Redis) + possibly WebSockets/SSE for realtime.
-
-
-
-
-
-
 # Pokemon Naming Game
 A web app multiplayer (or solo) name‑guessing game themed around the Pokémon franchise where players try to correctly identify Pokémon species names from memory under time. For each correct identification, players will score points. Future enhancements may include difficulty tiers, generation filters, competitive lobbies, and accessibility options (e.g., simplified spelling assistance or regional form handling).
 
@@ -161,6 +134,27 @@ rm -rf frontend/dist
 rm -rf backend/build backend/dist backend/__pycache__
 ```
 (Keep `PROJECT_NAME.spec` unless you intentionally want to regenerate it.)
+
+
+
+<br/>
+
+
+
+## Deployment (Railway)
+
+**Quick Deploy**
+1. Ensure repository contains added `Dockerfile` and `backend/wsgi.py` (already included).
+2. Push changes to your default branch.
+3. In Railway: New Project -> Deploy from GitHub -> select this repo.
+4. Railway auto-detects the Dockerfile and builds multi-stage image.
+5. After deploy, open the URL: `/api/health` should return JSON; root serves the React build.
+
+**Local Docker Test**
+```
+docker build -t pokemon-game .
+docker run -p 8000:8000 pokemon-game
+```
 
 
 
